@@ -1,0 +1,65 @@
+networks:
+  nyc-traffic-net:
+    driver: bridge
+
+services:
+
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_MS: 5400000
+    networks:
+      - nyc-traffic-net
+
+  spark-master:
+    image: spark:4.1.2-scala2.13-java21-python3-ubuntu
+    container_name: spark-master
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_HOME: /opt/spark
+    command: /opt/spark/sbin/start-master.sh
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    networks:
+      - nyc-traffic-net
+
+  spark-slave:
+    image: spark:4.1.2-scala2.13-java21-python3-ubuntu
+    container_name: spark-slave
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_HOME: /opt/spark
+    command: /opt/spark/sbin/start-worker.sh spark://spark-master:7077
+    depends_on:
+      - spark-master
+    networks:
+      - nyc-traffic-net
+
+  job-a:
+    build: ./job-a
+    container_name: job-a
+    env_file: .env
+    depends_on:
+      - kafka
+    networks:
+      - nyc-traffic-net
+
+  job-b:
+    build: ./job-b
+    container_name: job-b
+    env_file: .env
+    depends_on:
+      - kafka
+      - spark-master
+    networks:
+      - nyc-traffic-net
