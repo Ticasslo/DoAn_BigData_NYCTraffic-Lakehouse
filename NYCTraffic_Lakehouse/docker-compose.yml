@@ -21,11 +21,14 @@ services:
       - nyc-traffic-net
 
   spark-master:
-    image: spark:4.1.2-scala2.13-java21-python3-ubuntu
+    build:
+      context: ./spark
+      dockerfile: spark-master.Dockerfile
     container_name: spark-master
     environment:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_HOME: /opt/spark
+    env_file: .env
     command: /opt/spark/sbin/start-master.sh
     ports:
       - "8080:8080"
@@ -34,11 +37,14 @@ services:
       - nyc-traffic-net
 
   spark-slave:
-    image: spark:4.1.2-scala2.13-java21-python3-ubuntu
+    build:
+      context: ./spark
+      dockerfile: spark-slave.Dockerfile
     container_name: spark-slave
     environment:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_HOME: /opt/spark
+    env_file: .env
     command: /opt/spark/sbin/start-worker.sh spark://spark-master:7077
     depends_on:
       - spark-master
