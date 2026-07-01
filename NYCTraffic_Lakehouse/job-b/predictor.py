@@ -108,7 +108,8 @@ def init_kafka_consumer():
 
 
 # Query Kafka: lấy toàn bộ message 90 phút gần nhất theo link_id
-def query_kafka_snapshots():
+def query_kafka_snapshots(_retry=0):
+    global kafka_consumer
     # Assign thủ công các partition, seek về now-90min, đọc hết rồi dừng poll
     # Trả về dict: link_id -> list snapshot dict {data_as_of, current_congestion, speed_ratio, link_name}
     # Trả về None nếu Kafka không phản hồi
@@ -174,8 +175,17 @@ def query_kafka_snapshots():
         return snapshots_by_link
 
     except Exception as e:
-        logger.error(f"Kafka không phản hồi, skip lần chạy này: {e}")
-        return None
+        logger.warning(f"Kafka lỗi: {e}, đang retry...")
+        try:
+            kafka_consumer.close()
+        except Exception:
+            pass
+        init_kafka_consumer()
+        time.sleep(3)
+        if _retry >= 1:
+            logger.error("Kafka không phản hồi sau retry, skip lần chạy này")
+            return None
+        return query_kafka_snapshots(_retry=_retry + 1)
 
 
 # Tìm lag feature: Ưu tiên 1 (±5 phút quanh mốc) -> Ưu tiên 2 (LOCF)

@@ -2,7 +2,7 @@ pyspark==4.0.0
 APScheduler==3.11.2
 confluent-kafka==2.14.2
 pandas==2.2.3
-pyarrow==17.0.0
+pyarrow==18.0.0
 pytz==2024.2
 holidays==0.62
 azure-storage-blob==12.23.1

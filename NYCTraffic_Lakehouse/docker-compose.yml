@@ -7,6 +7,7 @@ services:
   kafka:
     image: apache/kafka:4.3.1
     container_name: kafka
+    restart: unless-stopped
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -17,20 +18,26 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_LOG_RETENTION_MS: 5400000
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms512m"
     networks:
       - nyc-traffic-net
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
-      interval: 10s
-      timeout: 5s
+      interval: 15s
+      timeout: 15s
       retries: 5
       start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
   spark-master:
     build:
       context: ./spark
       dockerfile: spark-master.Dockerfile
     container_name: spark-master
+    restart: unless-stopped
     environment:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_HOME: /opt/spark
@@ -47,6 +54,7 @@ services:
       context: ./spark
       dockerfile: spark-slave.Dockerfile
     container_name: spark-slave
+    restart: unless-stopped
     environment:
       SPARK_NO_DAEMONIZE: "true"
       SPARK_HOME: /opt/spark
@@ -60,6 +68,7 @@ services:
   job-a:
     build: ./job-a
     container_name: job-a
+    restart: unless-stopped
     env_file: .env
     depends_on:
       kafka:
@@ -70,6 +79,7 @@ services:
   job-b:
     build: ./job-b
     container_name: job-b
+    restart: unless-stopped
     env_file: .env
     depends_on:
       kafka:

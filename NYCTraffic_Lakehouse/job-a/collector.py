@@ -62,7 +62,7 @@ def fetch_realtime_feed():
     # Gọi linkdata.nyctmc.org. Timeout 15s, KHÔNG retry (intentional design)
     resp = requests.get(REALTIME_FEED_URL, timeout=15)
     resp.raise_for_status()
-    lines = resp.text.strip().split("\n")
+    lines = resp.text.strip().splitlines()
     header = lines[0].split("\t")
     rows = [dict(zip(header, line.split("\t"))) for line in lines[1:]]
     return rows
@@ -93,6 +93,8 @@ def compute_speed_ratio_congestion(speed: float, link_id: str):
     if link_id not in free_flow_speed_lookup:
         return None, None
     ffs = free_flow_speed_lookup[link_id]["free_flow_speed"]
+    if not ffs or ffs <= 0:
+        return None, None
     speed_ratio = speed / ffs
     if speed_ratio >= 0.67:
         current_congestion = 0
@@ -166,7 +168,13 @@ def count_distinct_links_in_kafka_90min() -> int:
 
         assign_tps = []
         for tp in offsets:
-            offset = tp.offset if tp.offset is not None and tp.offset >= 0 else 0
+            if tp.offset is not None and tp.offset >= 0:
+                offset = tp.offset
+            else:
+                _, high = consumer.get_watermark_offsets(
+                    TopicPartition(KAFKA_TOPIC, tp.partition), timeout=10
+                )
+                offset = high
             assign_tps.append(TopicPartition(KAFKA_TOPIC, tp.partition, offset))
         consumer.assign(assign_tps)
 
@@ -300,7 +308,11 @@ def run_collector():
         speed = parsed["speed"]
         data_as_of = parsed["data_as_of"]
         link_name = parsed["link_name"]
-
+        
+        # CASE 0 - link không nằm trong danh sách active
+        if link_id not in active_link_ids:
+            continue
+        
         # CASE 1 - link chết
         if data_as_of < dead_cutoff:
             continue
@@ -319,8 +331,15 @@ def run_collector():
             continue
 
         speed_ratio, current_congestion = compute_speed_ratio_congestion(speed, link_id)
+        if speed_ratio is None:
+            continue
+        
+        try:
+            push_to_kafka(link_id, data_as_of, current_congestion, speed_ratio, link_name)
+        except Exception as e:
+            logger.warning(f"Push Kafka fail cho link {link_id}, bỏ qua: {e}")
+            continue
 
-        push_to_kafka(link_id, data_as_of, current_congestion, speed_ratio, link_name)
         last_pushed_data_as_of[link_id] = data_as_of.isoformat()
         pushed_count += 1
 
@@ -334,6 +353,13 @@ def run_collector():
 
     producer.flush()
     logger.info(f"Run xong: {pushed_count} snapshots pushed lên Kafka")
+
+    stale_links = [
+        lid for lid, daof_str in last_pushed_data_as_of.items()
+        if datetime.fromisoformat(daof_str) < dead_cutoff
+    ]
+    for lid in stale_links:
+        del last_pushed_data_as_of[lid]
 
     write_bronze_realtime(bronze_records)
 
