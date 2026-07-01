@@ -20,6 +20,11 @@ from pyspark.ml.functions import vector_to_array
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("job-b")
 
+# Chặn Azure SDK log HTTP request/response chi tiết ở mức INFO
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 ACCOUNT_NAME = os.environ["AZURE_STORAGE_ACCOUNT_NAME"]
 ACCOUNT_KEY  = os.environ["AZURE_STORAGE_ACCOUNT_KEY"]
 CONTAINER    = os.environ.get("AZURE_CONTAINER_NAME", "nyc-traffic-lakehouse")

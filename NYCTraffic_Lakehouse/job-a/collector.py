@@ -16,6 +16,11 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("job-a")
 
+# Chặn Azure SDK log HTTP request/response chi tiết ở mức INFO
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 AZURE_CONN_STR  = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
 AZURE_CONTAINER = os.environ.get("AZURE_CONTAINER_NAME", "nyc-traffic-lakehouse")
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
@@ -24,7 +29,7 @@ KAFKA_TOPIC = "nyc-traffic-snapshots"
 REALTIME_FEED_URL = "https://linkdata.nyctmc.org/data/LinkSpeedQuery.txt"
 EASTERN = pytz.timezone("America/New_York")
 
-WARMUP_MIN_LINKS = 100   # < 100 distinct link trong Kafka 90 phút gần nhất -> warm-up
+WARMUP_MIN_LINKS = 20   # < 20 distinct link trong Kafka 90 phút gần nhất -> warm-up
 LINK_DEAD_MINUTES = 120  # DataAsOf cũ hơn 120 phút -> coi là link chết
 
 blob_service = BlobServiceClient.from_connection_string(AZURE_CONN_STR)
@@ -252,22 +257,17 @@ def warmup_from_bronze_realtime():
     logger.info(f"Warm-up xong: pushed {pushed} snapshots lên Kafka")
 
 
-consecutive_healthy_runs = 0
-HEALTHY_CHECK_INTERVAL = 30  # chỉ check lại warm-up mỗi 30 phút khi đã ổn định
+warmup_attempted = False  # global, set True ngay sau lần thử đầu tiên (thành công hay không)
 def maybe_warmup():
-    global consecutive_healthy_runs
-
-    # Nếu đã ổn định lâu rồi, chỉ check định kỳ thay vì mỗi phút
-    if consecutive_healthy_runs > 0 and consecutive_healthy_runs % HEALTHY_CHECK_INTERVAL != 0:
-        consecutive_healthy_runs += 1
-        return
+    global warmup_attempted
+    if warmup_attempted:
+        return   # đã thử 1 lần trong vòng đời container này, không lặp lại
 
     distinct_count = count_distinct_links_in_kafka_90min()
     if distinct_count >= WARMUP_MIN_LINKS:
-        consecutive_healthy_runs += 1
-        return  # đủ data, bỏ qua warm-up
+        warmup_attempted = True
+        return
 
-    consecutive_healthy_runs = 0  # reset vì đang thiếu data
     logger.warning(f"Kafka chỉ có {distinct_count} distinct links (<{WARMUP_MIN_LINKS}) - kiểm tra warm-up")
 
     container_client = blob_service.get_container_client(AZURE_CONTAINER)
@@ -277,9 +277,11 @@ def maybe_warmup():
 
     if not has_bronze_realtime:
         logger.warning("Bronze realtime trống (lần đầu deploy) - bỏ qua warm-up, hệ thống sẽ tự tích lũy data")
+        warmup_attempted = True
         return
 
     warmup_from_bronze_realtime()
+    warmup_attempted = True   # dù push được hay không, cũng không thử lại nữa
 
 
 # Main job: chạy mỗi 1 phút
